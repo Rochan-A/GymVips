@@ -1,0 +1,5 @@
+vipsenv.egg-info/*
+dist/*
+cmake_example.egg-info/*
+build/*
+**/a.out
