@@ -7,14 +7,14 @@
 #include <vector>
 #include <utility>
 #include <cstdlib>
+#include <vips/vips8>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
-#include "image_manip.hpp"
-
 using namespace std;
+using namespace vips;
 using namespace pybind11::literals;
 
 namespace py = pybind11;
@@ -60,14 +60,12 @@ py::array_t<T> init_3darray(int h, int w, int c)
     {
       for (size_t k = 0; k < a.shape(2); k++)
       {
-        /* type-cast */
-        view(i, j, k) = 0;
+        view(i, j, k) = (T)0;
       }
     }
   }
   return a;
 }
-
 
 /* BaseEnv class */
 class BaseEnv
@@ -76,7 +74,9 @@ class BaseEnv
 public:
   vector<string> files;
   pair<int, int> view_sz;
-  ImageContainer ic;
+
+  /* Hack to initialize */
+  VImage image = VImage::new_from_memory((void *)NULL, (size_t)1, 1, 1, 1, VIPS_FORMAT_UCHAR);
 
   /* Initialize files that we need to read */
   BaseEnv(py::list file_paths, py::tuple view_sz)
@@ -85,40 +85,47 @@ public:
     BaseEnv::view_sz = view_sz.cast<pair<int, int>>();
   }
 
-  /* Select a random file and initialize the ImageContainer */
   void _init_random_image()
   {
     random_device rd;
     mt19937 gen(rd());
     uniform_int_distribution<> dis(0, files.size());
 
-    ic.read_file(files[dis(gen)]);
+    /* pick random image from file list */
+    BaseEnv::image = VImage::new_from_file(&files[dis(gen)][0], VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
   }
 
-  /* Initalizes py::array_t of type with pixels of the region in memory */
-  template <typename T>
-  py::array_t<T> get_region(int h, int w, int c, box_t patch)
+  /* Initalizes 3D py::array_t of type with pixels of the region in memory */
+  py::array_t<int> get_region(box_t patch)
   {
-    const size_t _h = (size_t)h;
-    const size_t _w = (size_t)w;
-    const size_t _c = (size_t)c;
+    /* (view_sz.first, view_sz.second, 3) */
+    const size_t _h = (size_t)BaseEnv::view_sz.first;
+    const size_t _w = (size_t)BaseEnv::view_sz.second;
+    const size_t _c = (size_t)3;
 
-    constexpr size_t elsize = sizeof(T);
+    constexpr size_t elsize = sizeof(int);
     size_t shape[3]{_c, _h, _w};
     size_t strides[3]{_c * _h * elsize, _w * elsize, elsize};
-    auto a = py::array_t<T>(shape, strides);
-    auto view = a.template mutable_unchecked<3>();
+    auto a = py::array_t<int>(shape, strides);
+    auto view = a.mutable_unchecked<3>();
 
-    for (size_t i = 0; i < a.shape(0); i++)
-    {
-      for (size_t j = 0; j < a.shape(1); j++)
-      {
-        for (size_t k = 0; k < a.shape(2); k++)
-        {
-          // TODO: implement way to get pixel value
-          view(i, j, k) = 0; // ic.get_pixel(i, j, k);
+    VipsRect r{patch.first.first, patch.first.second, BaseEnv::view_sz.first, BaseEnv::view_sz.second};
+
+    VipsRegion *region;
+    if(!(region = vips_region_new(BaseEnv::image.get_image())))
+        vips_error_exit(NULL);
+
+    if (vips_region_prepare(region, &r))
+        vips_error("vips_region_prepare error!", NULL);
+
+    for (int y = 0; y < r.height; y++) {
+        VipsPel *p = VIPS_REGION_ADDR(region, r.left, r.top + y);
+        for (int x = 0; x < r.width; x++){
+            for (int b = 0; b < BaseEnv::image.bands(); b++){
+                view(b, y, x) = int(*p);
+                p++;
+            }
         }
-      }
     }
     return a;
   }
@@ -134,9 +141,9 @@ public:
 
     /* random (x, y) coordinates */
     pair<float, float> points{float(dis(gen)), float(dis(gen))};
-    box_t patch = continuous_to_coords(points, {ic.width, ic.height}, BaseEnv::view_sz);
+    box_t patch = continuous_to_coords(points, {BaseEnv::image.width(), BaseEnv::image.height()}, BaseEnv::view_sz);
 
-    return init_3darray<int>(10, 10, 3);//get_region<int>(BaseEnv::view_sz.first, BaseEnv::view_sz.second, 3, patch);
+    return get_region(patch);
   }
 
   py::array_t<int> step(py::tuple action)
@@ -145,18 +152,18 @@ public:
     float action_y = action.attr("__getitem__")(1).attr("__float__")().cast<float>();
 
     /* Get box based on action */
-    box_t patch = continuous_to_coords({action_x, action_y}, {ic.width, ic.height}, BaseEnv::view_sz);
+    box_t patch = continuous_to_coords({action_x, action_y}, {BaseEnv::image.width(), BaseEnv::image.height()}, BaseEnv::view_sz);
 
-    return get_region<int>(BaseEnv::view_sz.first, BaseEnv::view_sz.second, 3, patch);
+    return get_region(patch);
   }
 };
 
-
-PYBIND11_MODULE(vipsenv, m) {
-    py::class_<BaseEnv>(m, "BaseEnv")
-        .def(py::init<py::list, py::tuple>(), py::arg("file_paths"), py::arg("view_sz"))
-        .def("reset", &BaseEnv::reset, "reset method of environment")
-        .def("step", &BaseEnv::step, "step method of environment", py::arg("action"));
-        // .def_readwrite_static("files", &BaseEnv::files)
-        // .def_readwrite_static("view_sz", &BaseEnv::view_sz);
+PYBIND11_MODULE(vipsenv, m)
+{
+  py::class_<BaseEnv>(m, "BaseEnv")
+      .def(py::init<py::list, py::tuple>(), py::arg("file_paths"), py::arg("view_sz"))
+      .def("reset", &BaseEnv::reset, "reset method of environment")
+      .def("step", &BaseEnv::step, "step method of environment", py::arg("action"))
+      .def_readwrite("files", &BaseEnv::files)
+      .def_readwrite("view_sz", &BaseEnv::view_sz);
 }
