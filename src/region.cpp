@@ -44,17 +44,27 @@ class BaseEnv
 
 public:
   vector<string> files;
+  vector<int> classes;
   pair<int, int> view_sz;
   int max_episode_len = 100;
   int timestep = 0;
+  int dataset_index = 0;
 
   /* Hack to initialize */
   VImage image = VImage::new_from_memory((void *)NULL, (size_t)1, 1, 1, 1, VIPS_FORMAT_UCHAR);
 
   /* Initialize files that we need to read */
-  BaseEnv(py::list file_paths, py::tuple view_sz, int max_episode_len)
+  BaseEnv(py::dict dataset, py::tuple view_sz, int max_episode_len)
   {
-    BaseEnv::files = file_paths.cast<vector<string>>();
+    for (auto &item : dataset) {
+        /* dict keys are file paths, values are class_idx */
+        const std::string &key = item.first.cast<std::string>();
+        const int &value = item.second.cast<int>();
+
+        BaseEnv::files.push_back(key);
+        BaseEnv::classes.push_back(value);
+    }
+
     BaseEnv::view_sz = view_sz.cast<pair<int, int>>();
     BaseEnv::max_episode_len = max_episode_len;
   }
@@ -65,8 +75,10 @@ public:
     mt19937 gen(rd());
     uniform_int_distribution<> dis(0, BaseEnv::files.size());
 
+    BaseEnv::dataset_index = dis(gen);
+
     /* pick random image from file list */
-    BaseEnv::image = VImage::new_from_file(&BaseEnv::files[dis(gen)][0], VImage::option()->set("access", VIPS_ACCESS_RANDOM));
+    BaseEnv::image = VImage::new_from_file(&BaseEnv::files[BaseEnv::dataset_index][0], VImage::option()->set("access", VIPS_ACCESS_RANDOM));
   }
 
   /* Initalizes 3D py::array_t of type with pixels of the region in memory */
@@ -119,7 +131,7 @@ public:
 
     BaseEnv::timestep = 0;
 
-    py::dict info("timestep"_a=timestep);
+    py::dict info("timestep"_a=timestep, "target"_a=BaseEnv::classes[BaseEnv::dataset_index]);
     /* return (obs, info) */
     return py::make_tuple(get_region(patch), info);
   }
@@ -135,7 +147,7 @@ public:
 
     BaseEnv::timestep += 1;
 
-    py::dict info("timestep"_a=timestep);
+    py::dict info("timestep"_a=timestep, "target"_a=BaseEnv::classes[BaseEnv::dataset_index]);
     /* return (next_obs, reward, done, truncated, info) */
     return py::make_tuple(get_region(patch), 0, (timestep >= BaseEnv::max_episode_len ? py::bool_(true) : py::bool_(false)), py::bool_(false), info);
   }
@@ -144,10 +156,13 @@ public:
 PYBIND11_MODULE(vipsenv, m)
 {
   py::class_<BaseEnv>(m, "BaseEnv")
-      .def(py::init<py::list, py::tuple, int>(), py::arg("file_paths"), py::arg("view_sz"), py::arg("max_episode_len"))
+      .def(py::init<py::dict, py::tuple, int>(), py::arg("dataset"), py::arg("view_sz"), py::arg("max_episode_len"))
       .def("reset", &BaseEnv::reset, "reset method of environment")
       .def("step", &BaseEnv::step, "step method of environment", py::arg("action"))
       .def_readwrite("files", &BaseEnv::files)
+      .def_readwrite("classes", &BaseEnv::classes)
       .def_readwrite("view_sz", &BaseEnv::view_sz)
-      .def_readwrite("max_episode_len", &BaseEnv::max_episode_len);
+      .def_readwrite("max_episode_len", &BaseEnv::max_episode_len)
+      .def_readonly("timestep", &BaseEnv::timestep)
+      .def_readwrite("dataset_index", &BaseEnv::dataset_index);
 }

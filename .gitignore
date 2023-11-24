@@ -3,3 +3,5 @@ dist/*
 cmake_example.egg-info/*
 build/*
 **/a.out
+src/test.*
+src/*.so
