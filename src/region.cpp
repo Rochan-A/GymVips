@@ -73,7 +73,7 @@ public:
   {
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> dis(0, BaseEnv::files.size());
+    uniform_int_distribution<> dis(0, BaseEnv::files.size()-1);
 
     BaseEnv::dataset_index = dis(gen);
 
@@ -91,7 +91,7 @@ public:
 
     constexpr size_t elsize = sizeof(int);
     size_t shape[3]{_c, _h, _w};
-    size_t strides[3]{_c * _h * elsize, _w * elsize, elsize};
+    size_t strides[3]{_w * _h * elsize, _w * elsize, elsize};
     auto a = py::array_t<int>(shape, strides);
     auto view = a.mutable_unchecked<3>();
 
@@ -108,8 +108,7 @@ public:
         VipsPel *p = VIPS_REGION_ADDR(region, r.left, r.top + y);
         for (int x = 0; x < r.width; x++){
             for (int b = 0; b < BaseEnv::image.bands(); b++){
-                view(b, y, x) = int(*p);
-                p++;
+                view(b, y, x) = *p++;
             }
         }
     }
