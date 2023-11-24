@@ -38,35 +38,6 @@ box_t continuous_to_coords(pair<float, float> action, pair<int, int> img_sz, pai
   return {up_left, lower_right};
 }
 
-/* Initialize a 3D array to work with Python Numpy of template type
-   Numpy array has shape (c, h, w)
-*/
-template <typename T>
-py::array_t<T> init_3darray(int h, int w, int c)
-{
-  const size_t _h = (size_t)h;
-  const size_t _w = (size_t)w;
-  const size_t _c = (size_t)c;
-
-  constexpr size_t elsize = sizeof(T);
-  size_t shape[3]{_c, _h, _w};
-  size_t strides[3]{_c * _h * elsize, _w * elsize, elsize};
-  auto a = py::array_t<T>(shape, strides);
-  auto view = a.template mutable_unchecked<3>();
-
-  for (size_t i = 0; i < a.shape(0); i++)
-  {
-    for (size_t j = 0; j < a.shape(1); j++)
-    {
-      for (size_t k = 0; k < a.shape(2); k++)
-      {
-        view(i, j, k) = (T)0;
-      }
-    }
-  }
-  return a;
-}
-
 /* BaseEnv class */
 class BaseEnv
 {
@@ -74,25 +45,28 @@ class BaseEnv
 public:
   vector<string> files;
   pair<int, int> view_sz;
+  int max_episode_len = 100;
+  int timestep = 0;
 
   /* Hack to initialize */
   VImage image = VImage::new_from_memory((void *)NULL, (size_t)1, 1, 1, 1, VIPS_FORMAT_UCHAR);
 
   /* Initialize files that we need to read */
-  BaseEnv(py::list file_paths, py::tuple view_sz)
+  BaseEnv(py::list file_paths, py::tuple view_sz, int max_episode_len)
   {
     BaseEnv::files = file_paths.cast<vector<string>>();
     BaseEnv::view_sz = view_sz.cast<pair<int, int>>();
+    BaseEnv::max_episode_len = max_episode_len;
   }
 
   void _init_random_image()
   {
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> dis(0, files.size());
+    uniform_int_distribution<> dis(0, BaseEnv::files.size());
 
     /* pick random image from file list */
-    BaseEnv::image = VImage::new_from_file(&files[dis(gen)][0], VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
+    BaseEnv::image = VImage::new_from_file(&BaseEnv::files[dis(gen)][0], VImage::option()->set("access", VIPS_ACCESS_RANDOM));
   }
 
   /* Initalizes 3D py::array_t of type with pixels of the region in memory */
@@ -131,7 +105,7 @@ public:
   }
 
   /* reset the environment: select a random image and location to read */
-  py::array_t<int> reset()
+  py::tuple reset()
   {
     _init_random_image();
 
@@ -143,10 +117,15 @@ public:
     pair<float, float> points{float(dis(gen)), float(dis(gen))};
     box_t patch = continuous_to_coords(points, {BaseEnv::image.width(), BaseEnv::image.height()}, BaseEnv::view_sz);
 
-    return get_region(patch);
+    BaseEnv::timestep = 0;
+
+    py::dict info("timestep"_a=timestep);
+    /* return (obs, info) */
+    return py::make_tuple(get_region(patch), info);
   }
 
-  py::array_t<int> step(py::tuple action)
+  /* step the environment: select new observation and return */
+  py::tuple step(py::tuple action)
   {
     float action_x = action.attr("__getitem__")(0).attr("__float__")().cast<float>();
     float action_y = action.attr("__getitem__")(1).attr("__float__")().cast<float>();
@@ -154,16 +133,21 @@ public:
     /* Get box based on action */
     box_t patch = continuous_to_coords({action_x, action_y}, {BaseEnv::image.width(), BaseEnv::image.height()}, BaseEnv::view_sz);
 
-    return get_region(patch);
+    BaseEnv::timestep += 1;
+
+    py::dict info("timestep"_a=timestep);
+    /* return (next_obs, reward, done, truncated, info) */
+    return py::make_tuple(get_region(patch), 0, (timestep >= BaseEnv::max_episode_len ? py::bool_(true) : py::bool_(false)), py::bool_(false), info);
   }
 };
 
 PYBIND11_MODULE(vipsenv, m)
 {
   py::class_<BaseEnv>(m, "BaseEnv")
-      .def(py::init<py::list, py::tuple>(), py::arg("file_paths"), py::arg("view_sz"))
+      .def(py::init<py::list, py::tuple, int>(), py::arg("file_paths"), py::arg("view_sz"), py::arg("max_episode_len"))
       .def("reset", &BaseEnv::reset, "reset method of environment")
       .def("step", &BaseEnv::step, "step method of environment", py::arg("action"))
       .def_readwrite("files", &BaseEnv::files)
-      .def_readwrite("view_sz", &BaseEnv::view_sz);
+      .def_readwrite("view_sz", &BaseEnv::view_sz)
+      .def_readwrite("max_episode_len", &BaseEnv::max_episode_len);
 }
