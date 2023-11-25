@@ -7,6 +7,7 @@
 #include <vector>
 #include <utility>
 #include <cstdlib>
+#include <cstdint>
 #include <vips/vips8>
 
 #include <pybind11/pybind11.h>
@@ -52,11 +53,15 @@ public:
     pair<int, int> view_sz;
     int max_episode_len = 100;
     int timestep = 0;
-    int dataset_index = 0;
-    py::array_t<int> a;
+    int dataset_index = -1;
+    py::array_t<uint8_t> a;
 
     /* Hack to initialize */
-    VImage image = VImage::new_from_memory((void *)NULL, (size_t)1, 1, 1, 1, VIPS_FORMAT_UCHAR);
+    VipsImage *image;
+    int height;
+    int width;
+    int bands;
+    bool init = true;
 
     /**
      * @brief Constructor initalizing environment.
@@ -86,17 +91,16 @@ public:
             }
 
             this->view_sz = view_sz.cast<pair<int, int>>();
-            this->max_episode_len = max_episode_len;
-
+            this->max_episode_len = max_episode_len - 1;
 
             const size_t _h = static_cast<size_t>(this->view_sz.first);
             const size_t _w = static_cast<size_t>(this->view_sz.second);
             const size_t _c = static_cast<size_t>(3);
 
-            constexpr size_t elsize = sizeof(int);
+            constexpr size_t elsize = sizeof(uint8_t);
             size_t shape[3]{_c, _h, _w};
             size_t strides[3]{_w * _h * elsize, _w * elsize, elsize};
-            a = py::array_t<int>(shape, strides);
+            a = py::array_t<uint8_t>(shape, strides);
         }
         catch (const exception &e)
         {
@@ -123,13 +127,22 @@ public:
 
             dataset_index = dis(gen);
 
-            /* pick random image from file list */
-            image = VImage::new_from_file(&files[dataset_index][0], VImage::option()->set("access", VIPS_ACCESS_RANDOM));
+            if (init == false)
+            {
+                g_object_unref(image);
+            }
 
-            if (image.width() <= 0 || image.height() <= 0)
+            /* pick random image from file list */
+            image = vips_image_new_from_file(&files[dataset_index][0], VIPS_ACCESS_RANDOM, NULL);
+            height = vips_image_get_height(image);
+            width = vips_image_get_width(image);
+            bands = vips_image_get_bands(image);
+
+            if (width <= 0 || height <= 0)
             {
                 throw runtime_error("Failed to load image. Ensure that the image file is valid and accessible.");
             }
+            init = false;
         }
         catch (const exception &e)
         {
@@ -144,16 +157,16 @@ public:
      *
      * @param VipsRect* Pointer to a VipRect struct specifying the rectangular
      *      region to prepare as array_t.
-     * @return py::array_t<int> containing pixels of the rectangular region.
+     * @return py::array_t<uint8_t> containing pixels of the rectangular region.
      */
-    py::array_t<int> get_region(VipsRect *patch)
+    py::array_t<uint8_t> get_region(VipsRect *patch)
     {
         try
         {
             auto view = a.mutable_unchecked<3>();
 
             VipsRegion *region;
-            if (!(region = vips_region_new(image.get_image())))
+            if (!(region = vips_region_new(image)))
                 throw runtime_error("Failed to create VipsRegion");
 
             if (vips_region_prepare(region, patch))
@@ -166,12 +179,13 @@ public:
                 VipsPel *p = VIPS_REGION_ADDR(region, patch->left, patch->top + y);
                 for (int x = 0; x < patch->width; x++)
                 {
-                    for (int b = 0; b < image.bands(); b++)
+                    for (int b = 0; b < bands; b++)
                     {
                         view(b, y, x) = *p++;
                     }
                 }
             }
+            g_object_unref(region);
             return a;
         }
         catch (const exception &e)
@@ -184,7 +198,7 @@ public:
     /**
      * @brief Reset the environment.
      *
-     * @return py::tuple containing observation (py::array_t<int>) and info
+     * @return py::tuple containing observation (py::array_t<uint8_t>) and info
      *      (py::dict).
      */
     py::tuple reset()
@@ -197,7 +211,7 @@ public:
 
         /* random (x, y) coordinates */
         pair<float, float> points{static_cast<float>(dis(gen)), static_cast<float>(dis(gen))};
-        VipsRect patch = continuous_to_coords(points, {image.width(), image.height()}, view_sz);
+        VipsRect patch = continuous_to_coords(points, {width, height}, view_sz);
 
         timestep = 0;
 
@@ -211,7 +225,7 @@ public:
      *
      * @param py::tuple Action tuple.
      * @return py::tuple Contains
-     *      next observation (py::array_t<int>), reward (int),
+     *      next observation (py::array_t<uint8_t>), reward (int),
      *      done (py::bool_(false)), truncated (py::bool), info (py::dict)
      */
     py::tuple step(py::tuple action)
@@ -222,11 +236,17 @@ public:
             {
                 throw invalid_argument("Action must be a tuple of size 2 and values must be in (0, 1)");
             }
+
+            if (dataset_index == -1)
+            {
+                throw runtime_error("Called step() before reset()!");
+            }
+
             float action_x = action[0].cast<float>();
             float action_y = action[1].cast<float>();
 
             /* Get box based on action */
-            VipsRect patch = continuous_to_coords({action_x, action_y}, {image.width(), image.height()}, view_sz);
+            VipsRect patch = continuous_to_coords({action_x, action_y}, {width, height}, view_sz);
 
             timestep += 1;
 
