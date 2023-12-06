@@ -4,12 +4,13 @@ GymVips
 ## Requirements
 
 * Python >=3.7
+* pybind11 (via pip)
 * [Libvips](https://www.libvips.org/)
 
 ## Install
 
 ```(bash)
-$ git clone https://github.com/Rochan-A/GymVips.git
+$ git clone --recursive https://github.com/Rochan-A/GymVips.git
 $ cd GymVips
 $ pip install .
 ```

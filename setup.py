@@ -88,4 +88,5 @@ setup(
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
     python_requires=">=3.7",
+    install_requires=["pybind11>=2.11.1"]
 )

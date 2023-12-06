@@ -1,7 +1,3 @@
-/* compile with:
- *      g++ -g -Wall example.cc `pkg-config vips-cpp --cflags --libs`
- */
-
 #include <iostream>
 #include <random>
 #include <vector>
@@ -14,63 +10,25 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#include "envpool.h"
+#include "vipsenv.h"
+
 using namespace std;
 using namespace vips;
 using namespace pybind11::literals;
 
 namespace py = pybind11;
 
-/**
- * @brief Converts continuous coordinates of action to upper-left coordinates
- * given the image size and view size.
- *
- * @param action The continuous coordinates to convert.
- * @param img_sz The size of the image.
- * @param view_sz The size of the view.
- * @return VipsRect containing upper-left and rectangle height and width.
- */
-VipsRect continuous_to_coords(pair<float, float> action, pair<int, int> img_sz, pair<int, int> view_sz)
-{
-    // Normalize coordinates to the range [0, 1]
-    float x = (action.first + 1) / 2;
-    float y = (action.second + 1) / 2;
-
-    // Calculate upper-left coordinates
-    int up_left_x = static_cast<int>((img_sz.first - view_sz.first) * x);
-    int up_left_y = static_cast<int>((img_sz.second - view_sz.second) * y);
-    pair<int, int> up_left{};
-
-    return VipsRect{up_left_x, up_left_y, view_sz.first, view_sz.second};
-}
-
-/* BaseEnv class */
-class BaseEnv
+/* AsyncVipsEnv class */
+class AsyncVipsEnv
 {
 
 public:
-    vector<string> files;
-    vector<int> classes;
-    pair<int, int> view_sz;
-    int max_episode_len = 100;
-    int timestep = 0;
-    int dataset_index = -1;
     py::array_t<uint8_t> a;
+    init_t a{};
+    EnvPool<VipsEnv, action_t, data_t, init_t, 10> env_pool(a);
 
-    /* Hack to initialize */
-    VipsImage *image;
-    int height;
-    int width;
-    int bands;
-    bool init = true;
-
-    /**
-     * @brief Constructor initalizing environment.
-     *
-     * @param py::dict dataset with keys (path to image) and values (classes).
-     * @param py::tuple view size
-     * @param int maximum episode length
-     */
-    BaseEnv(py::dict dataset, py::tuple view_sz, int max_episode_len)
+    AsyncVipsEnv(py::dict dataset, py::tuple view_sz, int max_episode_len)
     {
 
         try
@@ -80,113 +38,30 @@ public:
                 throw invalid_argument("Invalid arguments. 'dataset' must not be empty, 'view_sz' must be a tuple of size 2, and 'max_episode_len' must be greater than 0.");
             }
 
+            init_t init;
             for (auto &item : dataset)
             {
                 /* dict keys are file paths, values are class_idx */
                 const string &key = item.first.cast<string>();
                 const int &value = item.second.cast<int>();
 
-                files.push_back(key);
-                classes.push_back(value);
+                init.files.push_back(key);
+                init.classes.push_back(value);
             }
 
-            this->view_sz = view_sz.cast<pair<int, int>>();
-            this->max_episode_len = max_episode_len - 1;
+            init.view_sz = view_sz.cast<pair<int, int>>();
+            init.max_episode_len = max_episode_len - 1;
 
-            const size_t _h = static_cast<size_t>(this->view_sz.first);
-            const size_t _w = static_cast<size_t>(this->view_sz.second);
+            this->env_pool = EnvPool<VipsEnv, action_t, data_t, init_t, 10>(init);
+
+            const size_t _h = static_cast<size_t>(init.view_sz.first);
+            const size_t _w = static_cast<size_t>(init.view_sz.second);
             const size_t _c = static_cast<size_t>(3);
 
             constexpr size_t elsize = sizeof(uint8_t);
             size_t shape[3]{_c, _h, _w};
             size_t strides[3]{_w * _h * elsize, _w * elsize, elsize};
             a = py::array_t<uint8_t>(shape, strides);
-        }
-        catch (const exception &e)
-        {
-            // Catch any C++ exceptions and convert them to Python exceptions
-            throw py::value_error(e.what());
-        }
-    }
-
-    /**
-     * @brief Initialize the image for the episode.
-     */
-    void _init_random_image()
-    {
-        try
-        {
-            if (files.empty())
-            {
-                throw runtime_error("No files available for initialization");
-            }
-
-            random_device rd;
-            mt19937 gen(rd());
-            uniform_int_distribution<> dis(0, files.size() - 1);
-
-            dataset_index = dis(gen);
-
-            if (init == false)
-            {
-                g_object_unref(image);
-            }
-
-            /* pick random image from file list */
-            image = vips_image_new_from_file(&files[dataset_index][0], VIPS_ACCESS_RANDOM, NULL);
-            height = vips_image_get_height(image);
-            width = vips_image_get_width(image);
-            bands = vips_image_get_bands(image);
-
-            if (width <= 0 || height <= 0)
-            {
-                throw runtime_error("Failed to load image. Ensure that the image file is valid and accessible.");
-            }
-            init = false;
-        }
-        catch (const exception &e)
-        {
-            // Catch any C++ exceptions and convert them to Python exceptions
-            throw py::value_error(e.what());
-        }
-    }
-
-    /**
-     * @brief Given a rectangular region within the image, prepare an array with
-     * pixel values from the region.
-     *
-     * @param VipsRect* Pointer to a VipRect struct specifying the rectangular
-     *      region to prepare as array_t.
-     * @return py::array_t<uint8_t> containing pixels of the rectangular region.
-     */
-    py::array_t<uint8_t> get_region(VipsRect *patch)
-    {
-        try
-        {
-            auto view = a.mutable_unchecked<3>();
-
-            VipsRegion *region;
-            if (!(region = vips_region_new(image)))
-                throw runtime_error("Failed to create VipsRegion");
-
-            if (vips_region_prepare(region, patch))
-            {
-                throw runtime_error("Failed to prepare VipsRegion. Ensure that the region coordinates are within the image boundaries.");
-            }
-
-            for (int y = 0; y < patch->height; y++)
-            {
-                VipsPel *p = VIPS_REGION_ADDR(region, patch->left, patch->top + y);
-                for (int x = 0; x < patch->width; x++)
-                {
-                    for (int b = 0; b < bands; b++)
-                    {
-                        view(b, y, x) = *p++;
-                    }
-                }
-            }
-            g_object_unref(region);
-            return a;
         }
         catch (const exception &e)
         {
@@ -203,20 +78,15 @@ public:
      */
     py::tuple reset()
     {
-        _init_random_image();
+        this->env_pool.reset();
+        std::vector<data_t> data = this->env_pool.recv()
 
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_real_distribution<> dis(0.0f, 1.0f);
+        auto view = a.mutable_unchecked<3>();
 
-        /* random (x, y) coordinates */
-        pair<float, float> points{static_cast<float>(dis(gen)), static_cast<float>(dis(gen))};
-        VipsRect patch = continuous_to_coords(points, {width, height}, view_sz);
+        // Fill view with data.obs
+        for (int i = 0; i < )
 
-        timestep = 0;
-
-        py::dict info("timestep"_a = timestep, "target"_a = classes[dataset_index]);
-        /* return (obs, info) */
+        py::dict info("timestep"_a = data.info.timestep, "target"_a = data.info.target);
         return py::make_tuple(get_region(&patch), info);
     }
 
@@ -276,15 +146,15 @@ public:
 
 PYBIND11_MODULE(vipsenv, m)
 {
-    py::class_<BaseEnv>(m, "BaseEnv")
+    py::class_<AsyncVipsEnv>(m, "AsyncVipsEnv")
         .def(py::init<py::dict, py::tuple, int>(), py::arg("dataset"), py::arg("view_sz"), py::arg("max_episode_len"))
-        .def("reset", &BaseEnv::reset, "Reset environment.")
-        .def("step", &BaseEnv::step, "Step in environment.", py::arg("action"))
-        .def("close", &BaseEnv::close, "Close environment.")
-        .def_readwrite("files", &BaseEnv::files)
-        .def_readwrite("classes", &BaseEnv::classes)
-        .def_readwrite("view_sz", &BaseEnv::view_sz)
-        .def_readwrite("max_episode_len", &BaseEnv::max_episode_len)
-        .def_readonly("timestep", &BaseEnv::timestep)
-        .def_readwrite("dataset_index", &BaseEnv::dataset_index);
+        .def("reset", &AsyncVipsEnv::reset, "Reset environment.")
+        .def("step", &AsyncVipsEnv::step, "Step in environment.", py::arg("action"))
+        .def("close", &AsyncVipsEnv::close, "Close environment.")
+        .def_readwrite("files", &AsyncVipsEnv::files)
+        .def_readwrite("classes", &AsyncVipsEnv::classes)
+        .def_readwrite("view_sz", &AsyncVipsEnv::view_sz)
+        .def_readwrite("max_episode_len", &AsyncVipsEnv::max_episode_len)
+        .def_readonly("timestep", &AsyncVipsEnv::timestep)
+        .def_readwrite("dataset_index", &AsyncVipsEnv::dataset_index);
 }
