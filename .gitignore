@@ -1,5 +1,5 @@
-src/test*
-
+src/test
+**.DS*
 
 # Using https://github.com/github/gitignore/blob/master/Python.gitignore
 

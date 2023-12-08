@@ -33,27 +33,21 @@ public:
                                   {
                 for (;;)
                 { // runs infinitely until stop_ == 1
-                    std::cout << "Start of thread loop" << std::endl;
                     action_t raw_action;
-                    std::cout << "Waiting to receive action" << std::endl;
                     action_bcq[i].wait_dequeue(raw_action);
                     if (stop_ == 1)
                     {
                         break;
                     }
-                    std::cout << "Got action" << std::endl;
 
                     data_t data;
                     if (raw_action.force_reset || envs_[i].is_done())
                     {
                         data = envs_[i].reset();
-                        std::cout << "Reset env" << std::endl;
                     } else {
                         data = envs_[i].step(raw_action);
-                        std::cout << "Stepped env" << std::endl;
                     }
                     data_bcq[i].enqueue(data);
-                    std::cout << "Enqueued data" << std::endl;
                 }
             });
         }
@@ -63,9 +57,7 @@ public:
     {
         for (int i = 0; i < num_envs_; i++)
         {
-            std::cout << "Adding to: " << i << std::endl;
             action_bcq[i].enqueue(action[i]);
-            std::cout << "Added to: " << i << std::endl;
         }
     }
 
