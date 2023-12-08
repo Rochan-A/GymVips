@@ -1,7 +1,23 @@
 #include <iostream>
 #include "concurrentqueue/blockingconcurrentqueue.h"
 
-// action_t must expose force_reset of type bool!
+/**
+ * Async EnvPool
+ *
+ * Represents an asynchronous environment pool designed for parallel
+ * simulation of environments.
+ *
+ * batch-action -> action queue -> threadpool -> state queue -> buffer-state
+ *
+ * The environment steps asynchronously. Class manages a fixed-size pool of
+ * environments.
+ *
+ * @tparam env_t      The type representing the environment.
+ * @tparam action_t   The type representing actions to be taken in the environment.
+ * @tparam data_t     The type representing the data associated with each environment.
+ * @tparam init_t     The type representing the initialization parameters for environments.
+ * @tparam size       The number of environments in the pool.
+ */
 template <class env_t, typename action_t, typename data_t, typename init_t, size_t size>
 class EnvPool
 {
@@ -18,11 +34,18 @@ public:
     // thread workers
     std::vector<std::thread> workers_;
 
-    EnvPool(init_t init)
+    /**
+     * Constructor for EnvPool
+     *
+     * Initializes an asynchronous environment pool with the specified initialization parameters.
+     *
+     * @param init_params   The initialization parameters for setting up the environments.
+     */
+    EnvPool(const init_t init_params)
     {
         for (int i = 0; i < num_envs_; i++)
         {
-            envs_.emplace_back(env_t(init));
+            envs_.emplace_back(env_t(init_params));
             action_bcq.emplace_back(moodycamel::BlockingConcurrentQueue<action_t>());
             data_bcq.emplace_back(moodycamel::BlockingConcurrentQueue<data_t>());
         }
@@ -32,7 +55,7 @@ public:
             workers_.emplace_back([this, i]
                                   {
                 for (;;)
-                { // runs infinitely until stop_ == 1
+                { // runs until stop_ == 1
                     action_t raw_action;
                     action_bcq[i].wait_dequeue(raw_action);
                     if (stop_ == 1)
@@ -48,11 +71,17 @@ public:
                         data = envs_[i].step(raw_action);
                     }
                     data_bcq[i].enqueue(data);
-                }
-            });
+                } });
         }
     }
 
+    /**
+     * Send Method
+     *
+     * Enqueues a batch of actions to be processed asynchronously by the environment pool.
+     *
+     * @param action   A vector of actions to be processed by the environment pool.
+     */
     void send(const std::vector<action_t> action)
     {
         for (int i = 0; i < num_envs_; i++)
@@ -61,6 +90,14 @@ public:
         }
     }
 
+    /**
+     * Receive Method
+     *
+     * Retrieves the latest batch of states resulting from the asynchronous processing
+     * of actions by the environment pool.
+     *
+     * @return A vector of data_t representing the current states of the environments.
+     */
     std::vector<data_t> recv(void)
     {
         std::vector<data_t> states(num_envs_);
@@ -71,6 +108,11 @@ public:
         return states;
     }
 
+    /**
+     * Reset Method
+     *
+     * Initiates a reset for all environments in the pool.
+     */
     void reset(void)
     {
         action_t empty_action;

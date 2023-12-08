@@ -81,12 +81,12 @@ public:
         this->env_pool.reset();
         std::vector<data_t> data = this->env_pool.recv()
 
-        auto view = a.mutable_unchecked<3>();
+                                       auto view = a.mutable_unchecked<3>();
 
         // Fill view with data.obs
-        for (int i = 0; i < )
+        for (int i = 0; i <)
 
-        py::dict info("timestep"_a = data.info.timestep, "target"_a = data.info.target);
+            py::dict info("timestep"_a = data.info.timestep, "target"_a = data.info.target);
         return py::make_tuple(get_region(&patch), info);
     }
 
