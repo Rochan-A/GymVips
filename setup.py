@@ -15,63 +15,12 @@ __version__ = "0.0.1"
 #   Sort input source files if you glob sources to ensure bit-for-bit
 #   reproducible builds
 
-
-def parse_text(text):
-    # Initialize lists to store parsed information
-    include_dirs = []
-    library_dirs = []
-    libraries = []
-
-    # Define regular expressions for -I, -L, and -l patterns
-    include_pattern = re.compile(r"-I(\S+)")
-    library_pattern = re.compile(r"-L(\S+)")
-
-    # Extract -I and -L options
-    include_dirs = include_pattern.findall(text)
-    library_dirs = library_pattern.findall(text)
-
-    # Extract -l options
-    libraries = re.findall(r"-l(\S+)", text)
-
-    return (
-        list(set(include_dirs)),
-        list(set(library_dirs)),
-        ["-l" + l for l in list(set(libraries))],
-    )
-
-
-gobject = subprocess.run(
-    ["pkg-config", "gobject-2.0", "--libs", "--cflags"], capture_output=True, text=True
-)
-glib = subprocess.run(
-    ["pkg-config", "glib-2.0", "--libs", "--cflags"], capture_output=True, text=True
-)
-vips_cpp = subprocess.run(
-    ["pkg-config", "vips-cpp", "--libs", "--cflags"], capture_output=True, text=True
-)
-
-if len(gobject.stdout) == 0:
-    raise RuntimeError(f"Issue with pkg-config gobject-2.0 --libs --cflags!")
-
-if len(glib.stdout) == 0:
-    raise RuntimeError(f"Issue with pkg-config glib-2.0 --libs --cflags!")
-
-if len(vips_cpp.stdout) == 0:
-    raise RuntimeError(f"Issue with pkg-config vips-cpp --libs --cflags!")
-
-include_dirs, library_dirs, extra_compile_args = parse_text(
-    vips_cpp.stdout # + gobject.stdout + glib.stdout
-)
-
 ext_modules = [
     Pybind11Extension(
         "vipsenv",
         sources=["src/main.cpp"],
         # Example: passing in the version to the compiled code
         define_macros=[("VERSION_INFO", __version__)],
-        include_dirs=include_dirs,
-        library_dirs=library_dirs,
-        extra_compile_args=["-lvips", "-lvips-cpp"] + extra_compile_args + ["-pthread"],
     ),
 ]
 
