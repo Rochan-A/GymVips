@@ -91,6 +91,7 @@ struct init_t
     std::vector<int> classes{};                         ///< Class Label
     std::pair<int, int> view_sz = std::make_pair(0, 0); ///< View size
     int max_episode_len = 100;                          ///< Max episode length
+    int num_env = 0;                                   ///< Number of environments
 };
 
 /**

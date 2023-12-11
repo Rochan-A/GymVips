@@ -14,9 +14,9 @@ int main(int argc, char **argv)
     i.classes = {0, 1};
     i.files = {"../../20220930_230209.jpeg", "../../20220930_230209_1.jpeg"};
     i.view_sz = std::make_pair(256, 256);
+    i.num_env = num_env;
 
-    EnvPool<VipsEnv, action_t, data_t, init_t, num_env> pool(i);
-
+    EnvPool<VipsEnv, action_t, data_t, init_t> pool(i);
     pool.reset();
 
     std::vector<data_t> data = pool.recv();

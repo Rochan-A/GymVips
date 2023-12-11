@@ -60,7 +60,7 @@ if len(vips_cpp.stdout) == 0:
     raise RuntimeError(f"Issue with pkg-config vips-cpp --libs --cflags!")
 
 include_dirs, library_dirs, extra_compile_args = parse_text(
-    gobject.stdout + glib.stdout + vips_cpp.stdout
+    vips_cpp.stdout # + gobject.stdout + glib.stdout
 )
 
 ext_modules = [
@@ -71,7 +71,7 @@ ext_modules = [
         define_macros=[("VERSION_INFO", __version__)],
         include_dirs=include_dirs,
         library_dirs=library_dirs,
-        extra_compile_args=extra_compile_args,
+        extra_compile_args=["-lvips", "-lvips-cpp"] + extra_compile_args + ["-pthread"],
     ),
 ]
 

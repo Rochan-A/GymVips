@@ -16,23 +16,31 @@
  * @tparam action_t   The type representing actions to be taken in the environment.
  * @tparam data_t     The type representing the data associated with each environment.
  * @tparam init_t     The type representing the initialization parameters for environments.
- * @tparam size       The number of environments in the pool.
  */
-template <class env_t, typename action_t, typename data_t, typename init_t, size_t size>
+template <class env_t, typename action_t, typename data_t, typename init_t>
 class EnvPool
 {
+private: // or public, depending on your design
+    EnvPool(const EnvPool&) = delete;
+    EnvPool& operator=(const EnvPool&) = delete;
+
 public:
-    const int num_envs_ = size;
+    int num_env_ = 0;
     int stop_ = 0;
+
+    init_t init;
 
     // vector of envs
     std::vector<env_t> envs_;
-    // buffers for action returned by policy
-    std::vector<moodycamel::BlockingConcurrentQueue<action_t>> action_bcq;
-    // buffers for data returned by env
-    std::vector<moodycamel::BlockingConcurrentQueue<data_t>> data_bcq;
+
+    // vector to hold pointers instead of instances of BlockingConcurrentQueue
+    std::vector<moodycamel::BlockingConcurrentQueue<action_t, moodycamel::ConcurrentQueueDefaultTraits>*> action_bcq;
+    std::vector<moodycamel::BlockingConcurrentQueue<data_t, moodycamel::ConcurrentQueueDefaultTraits>*> data_bcq;
+
     // thread workers
     std::vector<std::thread> workers_;
+
+    EnvPool(void){}
 
     /**
      * Constructor for EnvPool
@@ -43,21 +51,25 @@ public:
      */
     EnvPool(const init_t init_params)
     {
-        for (int i = 0; i < num_envs_; i++)
+        init = init_params;
+        num_env_ = init_params.num_env;
+        for (int i = 0; i < num_env_; i++)
         {
             envs_.emplace_back(env_t(init_params));
-            action_bcq.emplace_back(moodycamel::BlockingConcurrentQueue<action_t>());
-            data_bcq.emplace_back(moodycamel::BlockingConcurrentQueue<data_t>());
+
+            // Change the initialization to use pointers
+            action_bcq.emplace_back(new moodycamel::BlockingConcurrentQueue<action_t, moodycamel::ConcurrentQueueDefaultTraits>());
+            data_bcq.emplace_back(new moodycamel::BlockingConcurrentQueue<data_t, moodycamel::ConcurrentQueueDefaultTraits>());
         }
 
-        for (int i = 0; i < num_envs_; i++)
+        for (int i = 0; i < num_env_; i++)
         {
             workers_.emplace_back([this, i]
-                                  {
+            {
                 for (;;)
                 { // runs until stop_ == 1
                     action_t raw_action;
-                    action_bcq[i].wait_dequeue(raw_action);
+                    action_bcq[i]->wait_dequeue(raw_action);
                     if (stop_ == 1)
                     {
                         break;
@@ -70,8 +82,9 @@ public:
                     } else {
                         data = envs_[i].step(raw_action);
                     }
-                    data_bcq[i].enqueue(data);
-                } });
+                    data_bcq[i]->enqueue(data);
+                }
+            });
         }
     }
 
@@ -84,9 +97,9 @@ public:
      */
     void send(const std::vector<action_t> action)
     {
-        for (int i = 0; i < num_envs_; i++)
+        for (int i = 0; i < num_env_; i++)
         {
-            action_bcq[i].enqueue(action[i]);
+            action_bcq[i]->enqueue(action[i]);
         }
     }
 
@@ -100,10 +113,10 @@ public:
      */
     std::vector<data_t> recv(void)
     {
-        std::vector<data_t> states(num_envs_);
-        for (int i = 0; i < num_envs_; i++)
+        std::vector<data_t> states(num_env_);
+        for (int i = 0; i < num_env_; i++)
         {
-            data_bcq[i].wait_dequeue(states[i]);
+            data_bcq[i]->wait_dequeue(states[i]);
         }
         return states;
     }
@@ -117,9 +130,9 @@ public:
     {
         action_t empty_action;
         empty_action.force_reset = true;
-        for (int i = 0; i < num_envs_; i++)
+        for (int i = 0; i < num_env_; i++)
         {
-            action_bcq[i].enqueue(empty_action);
+            action_bcq[i]->enqueue(empty_action);
         }
     }
 
@@ -128,13 +141,16 @@ public:
         stop_ = 1;
         action_t empty_actions;
         empty_actions.force_reset = true;
-        for (int i = 0; i < num_envs_; i++)
+        for (int i = 0; i < num_env_; i++)
         {
-            action_bcq[i].enqueue(empty_actions);
+            action_bcq[i]->enqueue(empty_actions);
         }
         for (auto &worker : workers_)
         {
-            worker.join();
+            if (worker.joinable())
+            {
+                worker.join();
+            }
         }
     }
 };
