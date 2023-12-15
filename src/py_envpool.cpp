@@ -1,4 +1,3 @@
-#include <iostream>
 #include <random>
 #include <vector>
 #include <utility>
@@ -18,7 +17,7 @@ using namespace pybind11::literals;
 
 namespace py = pybind11;
 
-
+/*
 template <typename dtype>
 Array NumpyToArray(const py::array& arr) {
   using ArrayT = py::array_t<dtype, py::array::c_style | py::array::forcecast>;
@@ -27,7 +26,7 @@ Array NumpyToArray(const py::array& arr) {
                  std::vector<int>(arr_t.shape(), arr_t.shape() + arr_t.ndim()));
   return {spec, reinterpret_cast<char*>(arr_t.mutable_data())};
 }
-
+*/
 
 
 /**
@@ -122,7 +121,7 @@ public:
                 }
             }
             std::string key = "env_" + std::to_string(e);
-            info_dict[key] = py::dict("timestep"_a = data[e].info.timestep, "target"_a = data[e].info.target);
+            info_dict[&key[0]] = py::dict("timestep"_a = static_cast<int>(data[e].info.timestep), "target"_a = static_cast<int>(data[e].info.target));
         }
 
         return py::make_tuple(a, info_dict);
@@ -197,7 +196,7 @@ public:
                 truncated_unchecked(e) = data[e].truncated;
 
                 std::string key = "env_" + std::to_string(e);
-                info_dict[key] = py::dict("timestep"_a = data[e].info.timestep, "target"_a = data[e].info.target);
+                info_dict[&key[0]] = py::dict("timestep"_a = static_cast<int>(data[e].info.timestep), "target"_a = static_cast<int>(data[e].info.target));
             }
 
             return py::make_tuple(a, rewards, dones, truncated, info_dict);
@@ -212,17 +211,19 @@ public:
     /**
      * py api
      */
-    void PySend(const std::vector<py::array>& action) {
+/*
+  void PySend(const std::vector<py::array>& action) {
         std::vector<action_t> act;
         act.reserve(action.size());
         ToAction(action, &act);
         py::gil_scoped_release release;
         this->env_pool.send(act);
     }
-
+*/
     /**
      * py api
      */
+/*
     std::vector<py::array> PyRecv() {
         std::vector<data_t> data;
         {
@@ -235,16 +236,17 @@ public:
         ToNumpy(data, &ret);
         return ret;
     }
-
+*/
     /**
      * py api
      */
+/*
     void PyReset(const py::array& env_ids) {
         auto arr = NumpyToArray<int>(env_ids);
         py::gil_scoped_release release;
         this->env_pool.reset(arr);
     }
-
+*/
     /**
      * Close the environment.
      *

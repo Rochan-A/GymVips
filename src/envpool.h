@@ -96,7 +96,7 @@ public:
                                   {
                 for (;;)
                 { // runs until stop_ == 1
-                    action_t raw_action;
+                    action_t raw_action{};
                     action_bcq[i]->wait_dequeue(raw_action);
                     if (stop_ == 1)
                     {
@@ -176,8 +176,8 @@ public:
      */
     void reset(void)
     {
-        action_t empty_action{.force_reset = true};
-
+        action_t empty_action{};
+        empty_action.force_reset = true;
         for (int i = 0; i < num_env_; i++)
         {
             action_bcq[i]->enqueue(empty_action);
@@ -197,7 +197,7 @@ public:
     ~EnvPool()
     {
         stop_ = 1;
-        action_t empty_actions;
+        action_t empty_actions{};
         empty_actions.force_reset = true;
         for (int i = 0; i < num_env_; i++)
         {
