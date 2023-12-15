@@ -1,4 +1,3 @@
-#include <iostream>
 #include <random>
 #include <vector>
 #include <utility>
@@ -13,7 +12,7 @@ using namespace vips;
  */
 
 /**
- * ImageArray Class
+ * @brief ImageArray Class
  *
  * Represents a 3D array for storing image data with channels, height, and width dimensions.
  *
@@ -26,26 +25,30 @@ class ImageArray
 
 public:
     /**
-     * Default constructor for ImageArray.
+     * @brief Default constructor for ImageArray.
+     *
+     * @note Use this constructor to create an ImageArray instance without specific dimensions.
+     * Call the init() method to initialize the array with specific dimensions before use.
      */
     ImageArray(void) {}
 
     /**
-     * Initialize the ImageArray with specified dimensions.
+     * @brief Initialize the ImageArray with specified dimensions.
      *
      * @param c Number of channels.
      * @param h Height of the image.
      * @param w Width of the image.
+     *
+     * @note Use this method to initialize the ImageArray with specific dimensions before use.
      */
     void init(const int c, const int h, const int w)
     {
         C = c, H = h, W = w;
-
         array = std::vector<uint8_t>(c * w * h);
     }
 
     /**
-     * Accessor method for getting or setting pixel values in the image array.
+     * @brief Accessor method for getting or setting pixel values in the image array.
      *
      * @param c Channel index.
      * @param h Height index.
@@ -91,7 +94,7 @@ struct init_t
     std::vector<int> classes{};                         ///< Class Label
     std::pair<int, int> view_sz = std::make_pair(0, 0); ///< View size
     int max_episode_len = 100;                          ///< Max episode length
-    int num_env = 0;                                   ///< Number of environments
+    int num_env = 0;                                    ///< Number of environments
 };
 
 /**
@@ -116,24 +119,36 @@ VipsRect continuous_to_coords(std::pair<float, float> action, std::pair<int, int
     return VipsRect{up_left_x, up_left_y, view_sz.first, view_sz.second};
 }
 
+/**
+ * @brief VipsEnv Class
+ *
+ * Represents an environment using the VIPS image processing library.
+ *
+ * @class VipsEnv
+ */
 class VipsEnv
 {
 
 public:
-    std::vector<std::string> files;
-    std::vector<int> classes;
-    std::pair<int, int> view_sz;
-    int max_episode_len = 100;
-    int timestep = 0;
-    int dataset_index = -1;
+    std::vector<std::string> files; ///< File paths
+    std::vector<int> classes;       ///< Class Label
+    std::pair<int, int> view_sz;    ///< View size
+    int max_episode_len = 100;      ///< Max episode length
+    int timestep = 0;               ///< Current timestep in the simulation
+    int dataset_index = -1;         ///< Index of the current dataset
 
-    VImage image;
+    VImage image; ///< VIPS image object
     bool init = true;
 
-    int height = 0;
-    int width = 0;
-    int bands = 0;
+    int height = 0; ///< Height of the image
+    int width = 0;  ///< Width of the image
+    int bands = 0;  ///< Number of bands in the image
 
+    /**
+     * @brief Constructor for VipsEnv
+     *
+     * @param i Initialization parameters for the environment.
+     */
     VipsEnv(init_t i)
     {
         files = i.files;
@@ -142,6 +157,11 @@ public:
         view_sz = i.view_sz;
     }
 
+    /**
+     * @brief Initializes a random image from the dataset.
+     *
+     * @note This method initializes a random image from the dataset for the environment.
+     */
     void _init_random_image()
     {
         try
@@ -152,7 +172,7 @@ public:
 
             dataset_index = dis(gen);
 
-            /* pick random image from file list */
+            /* pick a random image from the file list */
             image = VImage::new_from_file(&(files[dataset_index][0]), VImage::option()->set("access", VIPS_ACCESS_RANDOM));
             height = image.height();
             width = image.width();
@@ -166,6 +186,12 @@ public:
         }
     }
 
+    /**
+     * @brief Gets a region from the current image and stores it in the provided image_t object.
+     *
+     * @param patch VipsRect object specifying the region to retrieve.
+     * @param img Reference to the image_t object to store the retrieved region.
+     */
     void get_region(VipsRect *patch, image_t &img)
     {
         VRegion v = image.region(patch);
@@ -184,6 +210,11 @@ public:
         }
     }
 
+    /**
+     * @brief Resets the environment by initializing a random image and creating the initial data_t object.
+     *
+     * @return Initial data_t object representing the state after the reset.
+     */
     data_t reset()
     {
         _init_random_image();
@@ -208,6 +239,12 @@ public:
         return data;
     }
 
+    /**
+     * @brief Takes a step in the environment based on the provided action.
+     *
+     * @param action Action to take in the environment.
+     * @return data_t object representing the state after the step.
+     */
     data_t step(action_t action)
     {
         float action_x = action.val.first;
@@ -229,6 +266,11 @@ public:
         return data;
     }
 
+    /**
+     * @brief Checks if the episode is done based on the current timestep and maximum episode length.
+     *
+     * @return true if the episode is done, false otherwise.
+     */
     bool is_done(void)
     {
         if (timestep >= max_episode_len)
@@ -238,6 +280,11 @@ public:
         return false;
     }
 
+    /**
+     * @brief Closes the environment.
+     *
+     * @note This method is a placeholder and currently does not perform any specific actions.
+     */
     void close(void)
     {
         // TODO: memory cleanup!
