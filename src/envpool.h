@@ -1,4 +1,6 @@
 #include <iostream>
+#include <vector>
+#include <thread>
 #include "concurrentqueue/blockingconcurrentqueue.h"
 
 /**
@@ -33,7 +35,7 @@ private:
     EnvPool &operator=(const EnvPool &) = delete;
 
 public:
-    int num_env_ = 0; /**< Number of environments in the pool. */
+    const int num_env_ = 0; /**< Number of environments in the pool. */
     int stop_ = 0;    /**< Flag to signal worker threads to stop processing. */
 
     init_t init; /**< Initialization parameters for setting up the environments. */
@@ -74,13 +76,12 @@ public:
      * @see EnvPool::recv() for retrieving states resulting from asynchronous processing.
      * @see EnvPool::reset() for initiating a reset in a controlled manner.
      */
-    EnvPool(const init_t init_params)
+    EnvPool(init_t init_params) : num_env_(init_params.num_env)
     {
         init = init_params;
-        num_env_ = init_params.num_env;
 
         // Initialize environments, action queues, and data queues
-        for (int i = 0; i < num_env_; i++)
+        for (int i = 0; i < num_env_; ++i)
         {
             envs_.emplace_back(env_t(init_params));
 
@@ -90,13 +91,13 @@ public:
         }
 
         // Create worker threads for asynchronous processing of actions
-        for (int i = 0; i < num_env_; i++)
+        for (int i = 0; i < num_env_; ++i)
         {
             workers_.emplace_back([this, i]
                                   {
                 for (;;)
                 { // runs until stop_ == 1
-                    action_t raw_action{};
+                    action_t raw_action;
                     action_bcq[i]->wait_dequeue(raw_action);
                     if (stop_ == 1)
                     {
@@ -111,8 +112,18 @@ public:
                         data = envs_[i].step(raw_action);
                     }
                     data_bcq[i]->enqueue(data);
-                } });
+                }});
         }
+
+      std::size_t processor_count = std::thread::hardware_concurrency();
+      for (std::size_t tid = 0; tid < num_env_; ++tid) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        std::size_t cid = tid % processor_count;
+        CPU_SET(cid, &cpuset);
+        pthread_setaffinity_np(workers_[tid].native_handle(), sizeof(cpu_set_t),
+                               &cpuset);
+      }
     }
 
     /**
@@ -131,7 +142,7 @@ public:
      */
     void send(const std::vector<action_t> action)
     {
-        for (int i = 0; i < num_env_; i++)
+        for (int i = 0; i < num_env_; ++i)
         {
             action_bcq[i]->enqueue(action[i]);
         }
@@ -155,11 +166,11 @@ public:
     std::vector<data_t> recv(void)
     {
         std::vector<data_t> states(num_env_);
-        for (int i = 0; i < num_env_; i++)
+        for (int i = 0; i < num_env_; ++i)
         {
             data_bcq[i]->wait_dequeue(states[i]);
         }
-        return states;
+        return std::move(states);
     }
 
     /**
@@ -176,9 +187,8 @@ public:
      */
     void reset(void)
     {
-        action_t empty_action{};
-        empty_action.force_reset = true;
-        for (int i = 0; i < num_env_; i++)
+        action_t empty_action(true);
+        for (int i = 0; i < num_env_; ++i)
         {
             action_bcq[i]->enqueue(empty_action);
         }
@@ -197,9 +207,8 @@ public:
     ~EnvPool()
     {
         stop_ = 1;
-        action_t empty_actions{};
-        empty_actions.force_reset = true;
-        for (int i = 0; i < num_env_; i++)
+        action_t empty_actions(true);
+        for (int i = 0; i < num_env_; ++i)
         {
             action_bcq[i]->enqueue(empty_actions);
         }

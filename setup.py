@@ -15,20 +15,21 @@ __version__ = "0.0.1"
 
 ext_modules = [
     Pybind11Extension(
-        "vipsenv",
+        "vipsenvpool.compiled",
         sources=["src/py_envpool.cpp"],
         # Example: passing in the version to the compiled code
         define_macros=[("VERSION_INFO", __version__)],
         extra_compile_args=[
             "-pthread",
             "-std=c++11",
+            "-O3"
         ],
         libraries=["vips-cpp", "vips", "gio-2.0", "gobject-2.0", "glib-2.0"],
     ),
 ]
 
 setup(
-    name="vipsenv",
+    name="vipsenvpool",
     version=__version__,
     author="Rochan Avlur",
     author_email="rochan.avlur@gmail.com",
@@ -36,6 +37,8 @@ setup(
     description="Vectorized Image-based RL Gym Library with Vips",
     long_description="",
     ext_modules=ext_modules,
+    packages=["vipsenvpool"],
+    package_dir={"vipsenvpool": "src/py_src"},
     extras_require={"test": "pytest"},
     cmdclass={"build_ext": build_ext},
     zip_safe=False,

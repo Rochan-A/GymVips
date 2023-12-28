@@ -17,15 +17,16 @@ int main(int argc, char **argv)
         vips_error_exit(NULL);
 
     // Set the number of environments
-    const size_t num_env = 8;
+    const size_t num_env = 45;
 
     // Initialize parameters for environment pool
     init_t i;
     i.classes = {0, 1};
-    std::string f_name = std::to_string(argv[1]);
+    std::string f_name(argv[1]);
     i.files = {f_name, f_name};
     i.view_sz = std::make_pair(256, 256);
     i.num_env = num_env;
+    i.max_episode_len = 100;
 
     // Create an environment pool
     EnvPool<VipsEnv, action_t, data_t, init_t> pool(i);
@@ -46,9 +47,9 @@ int main(int argc, char **argv)
     /* Getting the number of milliseconds as an integer. */
     auto ms_int = duration_cast<milliseconds>(t2 - t1);
 
-    // Perform 1 Million steps
+    // Perform 1 Million steps across 45 envs
     int step = num_env;
-    while (step < 1'000'000)
+    while (step < 22500)
     {
         // Send actions and receive data from the environment pool
         pool.send(act);
@@ -56,7 +57,7 @@ int main(int argc, char **argv)
         step += num_env;
 
         // Print progress every 10,000 steps
-        if (step % 10'000 == 0)
+        if (step % 10000 == 0)
         {
             t2 = high_resolution_clock::now();
 

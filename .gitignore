@@ -1,4 +1,4 @@
-src/test
+tests/test
 **.DS*
 
 # Using https://github.com/github/gitignore/blob/master/Python.gitignore
