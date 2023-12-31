@@ -43,5 +43,10 @@ setup(
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
     python_requires=">=3.7",
-    install_requires=["pybind11>=2.11.1"],
+    install_requires=[
+        "pybind11>=2.11.1",
+        "numpy>=1.26.2",
+        # below packages are needed only for testing purposes
+        "gymnasium>=0.29.1",
+        ],
 )
